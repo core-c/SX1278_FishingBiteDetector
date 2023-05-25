@@ -13,7 +13,7 @@ The bitrate is very low, **0.666 bits per second**.<br>
 The sent packet-format is quite simple: **No preamble, no syncword, no CRC, just a 32-bit value**.<br>
 A packet ends with an extra long pulse, followed by an extra long pause (in between multiple sent packets).<br>
 The 0-bit pulse has a shorter duration than the 1-bit pulse.<br>
-In fact, the signal looks alot like a morse-code transmission.<br>
+In fact, the signal looks a lot like a morse-code transmission.<br>
 <br>
 I do not use any packet-mode, nor bit-sequencer. Only the signal-strength is used to interpret the transmissions.<br>
 The bite-detector has some drift around the FSK center-frequency (about -/+ 3.5KHz). To compensate for that drift, i had to use the **AFC (auto frequency correction)**.<br>
