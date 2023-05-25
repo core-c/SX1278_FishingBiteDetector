@@ -10,6 +10,11 @@
 #include <RadioLib.h>
 #include <Adafruit_SSD1306.h>
 #include <Ticker.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+
 
 //=== SERIAL MONITOR ===============================================================
 #define SERIAL_DEBUG 1
@@ -68,16 +73,10 @@ Ticker OLEDdisplayer;
 float oled_rssi = -1000.0f;
 uint32_t oled_packet = 0x0000;
 uint16_t oled_packetcount = 0;
+String oled_setting = "";
 
 
-// OLED static callback routine
-void OLED_display_callback() {
-  OLEDpacket(oled_packet, oled_rssi, oled_packetcount);
-  oled_packet = 0x0000;
-  oled_rssi = -1000.0f;
-}
-
-void OLEDpacket(uint32_t packet, float rssi, uint16_t packetcount) {
+void OLED_show(uint32_t packet, float rssi, uint16_t packetcount, String setting_string) {
   // we display the packet bits on 2 rows because it'll not fit on one row of the OLED
   String packetstring1 = "";
   String packetstring2 = "";
@@ -105,13 +104,18 @@ void OLEDpacket(uint32_t packet, float rssi, uint16_t packetcount) {
     oled.print(packetstring2);
     oled.setCursor(0,32);
     oled.print(packet,HEX);
+    // perfect hit?
+    if ((packet & 0x00FF0000) == 0x00790000) {
+      oled.drawBitmap(104, 17, fish_bmp, FISH_WIDTH, FISH_HEIGHT, SSD1306_WHITE);
+      oled.setCursor(104,32);
+      oled.print(packetcount);
+    }
+  } else {
+    oled.setTextSize(2);
+    oled.setCursor(0,22);
+    oled.print(setting_string);
   }
-  if ((packet & 0x00FF0000) == 0x00790000) {
-    oled.drawBitmap(104, 17, fish_bmp, FISH_WIDTH, FISH_HEIGHT, SSD1306_WHITE);
-    oled.setCursor(104,32);
-    oled.print(packetcount);
-  }
-  //oled.setTextSize(1);
+  oled.setTextSize(1);
   oled.setCursor(0,53);
   oled.print("RSSI: ");
   oled.setCursor(36,53);
@@ -122,6 +126,14 @@ void OLEDpacket(uint32_t packet, float rssi, uint16_t packetcount) {
   oled.drawFastHLine(0, 62, w, SSD1306_WHITE); // oled.drawFastHLine(w, 62, 128-w, SSD1306_BLACK);
   oled.drawFastHLine(0, 63, w, SSD1306_WHITE); // oled.drawFastHLine(w, 63, 128-w, SSD1306_BLACK);
   oled.display();
+}
+
+
+// OLED static callback routine
+void OLED_display_callback() {
+  OLED_show(oled_packet, oled_rssi, oled_packetcount, oled_setting);
+  oled_packet = 0x0000;
+  oled_rssi = -1000.0f;
 }
 
 
@@ -156,6 +168,65 @@ void SOUND_play(int ms) {
 }
 
 
+//=== BLUETOOTH ====================================================================
+BLEServer *pServer = NULL;
+BLECharacteristic * pTxCharacteristic;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+uint8_t txValue = 0;
+
+#define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E" // UART service UUID
+#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+    };
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+    }
+};
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      std::string rxValue = pCharacteristic->getValue();
+      if (rxValue.length() > 0) {
+        DEBUG_PRINTLN(F(""));
+        DEBUG_PRINT(F("BLE Received Value: "));
+        for (int i = 0; i < rxValue.length(); i++) DEBUG_PRINT(rxValue[i]);
+        //DEBUG_PRINT(rxValue);
+        DEBUG_PRINTLN(F(""));
+        // change the setting
+        String value = rxValue.c_str();
+        EditValue(value);
+      }
+    }
+};
+
+void BT_server_start() {
+  // Create the BLE Device
+  BLEDevice::init("Beetmelder");
+  // Create the BLE Server
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+  // Create the BLE Service
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  // Create a BLE TX Characteristic
+  pTxCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TX, BLECharacteristic::PROPERTY_NOTIFY);       
+  pTxCharacteristic->addDescriptor(new BLE2902());
+  // Create a BLE RX Characteristic
+  BLECharacteristic * pRxCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_RX, BLECharacteristic::PROPERTY_WRITE);
+  // callback for processing the received data
+  pRxCharacteristic->setCallbacks(new MyCallbacks());
+  // Start the service
+  pService->start();
+  // Start advertising
+  pServer->getAdvertising()->start();
+}
+
+
 //=== Radio settings ===============================================================
 #define RADIO_FREQUENCY_MHZ 433.96
 #define RADIO_BITRATE 0.666
@@ -177,6 +248,7 @@ uint32_t signal_start, signal_end, signal_us;
 uint32_t low_start = 0, low_us;
 uint32_t packet = 0x0000;
 int packetbits = -1;
+uint16_t packetcount = 0; // how many valid packets are received before the next timeout occurs
 float noisefloor = NOISE_FLOOR;
 int state;
 
@@ -192,6 +264,43 @@ int state;
   }
 
 
+void EditValue(String value) {
+  // save the value for display during signal inactivity
+  oled_setting = value;
+  // process
+  if (value.substring(0,1) == "d") { // freq deviation
+    float freqDeviation = value.substring(1).toFloat();
+    radio.setFrequencyDeviation(freqDeviation);
+    DEBUG_PRINT(F("FREQUENCY DEVIATION: "));
+    DEBUG_PRINTLN(freqDeviation);
+  } else
+  if (value.substring(0,1) == "w") { // rx bandwidth
+    float rxBandwidth = value.substring(1).toFloat();
+    radio.setRxBandwidth(rxBandwidth);
+    DEBUG_PRINT(F("RX BANDWIDTH: "));
+    DEBUG_PRINTLN(rxBandwidth);
+  }
+  if (value.substring(0,1) == "b") { // bitrate
+    float bitrate = value.substring(1).toFloat();
+    radio.setBitRate(bitrate);
+    DEBUG_PRINT(F("BITRATE: "));
+    DEBUG_PRINTLN(bitrate);
+  }
+  if (value.substring(0,1) == "s") { // rssi smoothing
+    float smooth = value.substring(1).toInt();
+    radio.setRSSIConfig(smooth); // 0=2 samples, 1=4 samples, 2=8 samples, 3=16...
+    DEBUG_PRINT(F("RSSI SMOOTHING: "));
+    DEBUG_PRINTLN(smooth);
+  }
+  if (value.substring(0,1) == "n") { // noisefloor
+    float noise = value.substring(1).toFloat();
+    radio.setBitRate(noise);
+    DEBUG_PRINT(F("NOISEFLOOR: "));
+    DEBUG_PRINTLN(noise);
+  }
+}
+
+
 //=== SETUP FUNCTION ===============================================================
 void setup() {
 #ifdef SERIAL_DEBUG
@@ -205,6 +314,10 @@ void setup() {
 
   // sound module
   pinMode(SOUND_PLAY_PIN, OUTPUT);
+
+  // start a BLE server
+  DEBUG_PRINTLN(F("BLE Initialize"));
+  BT_server_start();
 
   // ESP32 information
   uint32_t mhz = getCpuFrequencyMhz(); // cpu_hal_get_cycle_count()  clockCyclesPerMicrosecond()  microsecondsToClockCycles()
@@ -389,6 +502,7 @@ void loop() {
           // copy values for display on the OLED
           oled_packet = packet;
           if (signal_rssi > oled_rssi) oled_rssi = signal_rssi;
+          oled_packetcount = packetcount;
           OLEDdisplayer.once_ms(1, OLED_display_callback);
         } else { // mismatch
           DEBUG_PRINT(F("\t\t"));
@@ -399,52 +513,42 @@ void loop() {
         packet = 0x0000;
         packetbits = -1;
         signal_rssi = -1000.0f;
-        oled_packetcount++;
+        packetcount++;
       }
 
     } else { //=============================================================================== no signal for a while
 
+      // reset the packetcount, and clear the OLED display
       if ((esp_timer_get_time() - signal_end) / 1000000 > TIMEOUT_CLEAR) { // no signal for 10s
-        oled_packetcount = 0;
-        OLEDpacket(0x0000, rssi, oled_packetcount);
+        packetcount = 0;
+        OLED_show(0x00000000, rssi, 0x0000, oled_setting);
+      }
+
+      // Bluetooth
+      if ((esp_timer_get_time() - signal_end) / 1000000 > TIMEOUT_CLEAR) { // no signal for 10s
+        // disconnecting
+        if (!deviceConnected && oldDeviceConnected) {
+            delay(500); // give the bluetooth stack the chance to get things ready
+            pServer->startAdvertising(); // restart advertising
+            DEBUG_PRINTLN(F(""));
+            DEBUG_PRINTLN(F("BLE Start advertising"));
+            oldDeviceConnected = deviceConnected;
+        }
+        // connecting
+        if (deviceConnected && !oldDeviceConnected) {
+        // do stuff here on connecting
+            oldDeviceConnected = deviceConnected;
+        }
       }
 
 #ifdef SERIAL_DEBUG
+      // check for serial input
       if ((esp_timer_get_time() - signal_end) / 1000000 > TIMEOUT_SERIAL_INPUT) { // no signal for 1s
         if (Serial.available()) {
           String value = Serial.readString();
           DEBUG_PRINTLN(value);
           value.trim();
-          if (value.substring(0,1) == "d") { // freq deviation
-            float freqDeviation = value.substring(1).toFloat();
-            radio.setFrequencyDeviation(freqDeviation);
-            DEBUG_PRINT(F("FREQUENCY DEVIATION: "));
-            DEBUG_PRINTLN(freqDeviation);
-          } else
-          if (value.substring(0,1) == "w") { // rx bandwidth
-            float rxBandwidth = value.substring(1).toFloat();
-            radio.setRxBandwidth(rxBandwidth);
-            DEBUG_PRINT(F("RX BANDWIDTH: "));
-            DEBUG_PRINTLN(rxBandwidth);
-          }
-          if (value.substring(0,1) == "b") { // bitrate
-            float bitrate = value.substring(1).toFloat();
-            radio.setBitRate(bitrate);
-            DEBUG_PRINT(F("BITRATE: "));
-            DEBUG_PRINTLN(bitrate);
-          }
-          if (value.substring(0,1) == "s") { // rssi
-            float smooth = value.substring(1).toInt();
-            radio.setRSSIConfig(smooth); // 0=2 samples, 1=4 samples, 2=8 samples, 3=16...
-            DEBUG_PRINT(F("RSSI SMOOTHING: "));
-            DEBUG_PRINTLN(smooth);
-          }
-          if (value.substring(0,1) == "n") { // noisefloor
-            float noise = value.substring(1).toFloat();
-            radio.setBitRate(noise);
-            DEBUG_PRINT(F("NOISEFLOOR: "));
-            DEBUG_PRINTLN(noise);
-          }
+          EditValue(value);
           while (Serial.available()) Serial.read();
           radio.startReceive();
         }
