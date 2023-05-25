@@ -24,12 +24,14 @@ This way you can edit the radio config without flashing a new program. This is v
 The following strings can be used:<br>
 * d Frequency deviation<br>
 * w RX bandwidth<br>
-* b Bitrate<br>
+* r Bitrate<br>
 * s RSSI smoothing<br>
 * n Noisefloor<br>
+* b Turn off Bluetooth BLE
 
 You can send something like **u-90.0** to set the noisefloor at -90.0 dBm.<br>
 Or you could send **s2** to set the RSSI-smoothing to 8 samples.<br>
+Turn off BLE by sending **b0**.<br>
 <br>
 ![Bite Detector](IMG_20230525_095853.jpg "Bite detector")
 ![LilyGO](IMG_20230525_095848.jpg "LilyGO")
