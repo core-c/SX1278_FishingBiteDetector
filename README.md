@@ -17,7 +17,20 @@ In fact, the signal looks a lot like a morse-code transmission.<br>
 <br>
 I do not use any packet-mode, nor bit-sequencer. Only the signal-strength is used to interpret the transmissions.<br>
 The bite-detector has some drift around the FSK center-frequency (about -/+ 3.5KHz). To compensate for that drift, i had to use the **AFC (auto frequency correction)**.<br>
+<br>
+<br>
+It is possible to send short text messages to the board via the **serial**- or **BLE**-connection.<br>
+This way you can edit the radio config without flashing a new program. This is very handy when working with the device in the field, and you want to make some changes.<br>
+The following strings can be used:<br>
+* d Frequency deviation<br>
+* w RX bandwidth<br>
+* b Bitrate<br>
+* s RSSI smoothing<br>
+* n Noisefloor<br>
 
+You can send something like **u-90.0** to set the noisefloor at -90.0 dBm.<br>
+Or you could send **s2** to set the RSSI-smoothing to 8 samples.<br>
+<br>
 ![Bite Detector](IMG_20230525_095853.jpg "Bite detector")
 ![LilyGO](IMG_20230525_095848.jpg "LilyGO")
 ![Spectrum](signal_spectrum.png "Signal spectrum")
