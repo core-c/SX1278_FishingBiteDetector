@@ -20,3 +20,7 @@ The bite-detector has some drift around the FSK center-frequency (about -/+ 3.5K
 
 ![Bite Detector](IMG_20230525_095853.jpg "Bite detector")
 ![LilyGO](IMG_20230525_095848.jpg "LilyGO")
+![Spectrum](signal_spectrum.png "Signal spectrum")
+![Burst](signal_1burstofpackets.png "Signal burst of packets")
+![Packet](signal_1packet.png "Signal single packet")
+![Bits](signal_1bit.png "Signal bit")
