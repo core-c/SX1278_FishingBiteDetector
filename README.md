@@ -17,3 +17,6 @@ In fact, the signal looks alot like a morse-code transmission.<br>
 <br>
 I do not use any packet-mode, nor bit-sequencer. Only the signal-strength is used to interpret the transmissions.<br>
 The bite-detector has some drift around the FSK center-frequency (about -/+ 3.5KHz). To compensate for that drift, i had to use the **AFC (auto frequency correction)**.<br>
+
+![Bite Detector](IMG_20230525_095853.jpg "Bite detector")
+![LilyGO](IMG_20230525_095848.jpg "LilyGO")
