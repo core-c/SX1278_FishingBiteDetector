@@ -280,14 +280,14 @@ void EditValue(String value) {
     DEBUG_PRINT(F("RX BANDWIDTH: "));
     DEBUG_PRINTLN(rxBandwidth);
   }
-  if (value.substring(0,1) == "b") { // bitrate
+  if (value.substring(0,1) == "r") { // bitrate
     float bitrate = value.substring(1).toFloat();
     radio.setBitRate(bitrate);
     DEBUG_PRINT(F("BITRATE: "));
     DEBUG_PRINTLN(bitrate);
   }
   if (value.substring(0,1) == "s") { // rssi smoothing
-    float smooth = value.substring(1).toInt();
+    uint8_t smooth = value.substring(1).toInt();
     radio.setRSSIConfig(smooth); // 0=2 samples, 1=4 samples, 2=8 samples, 3=16...
     DEBUG_PRINT(F("RSSI SMOOTHING: "));
     DEBUG_PRINTLN(smooth);
@@ -298,6 +298,19 @@ void EditValue(String value) {
     DEBUG_PRINT(F("NOISEFLOOR: "));
     DEBUG_PRINTLN(noise);
   }
+
+  if (value.substring(0,1) == "b") { // BLE enable/disable
+    uint8_t ble_enabled = value.substring(1).toInt();
+    if (ble_enabled == 0) {
+      BLEDevice::stopAdvertising();
+      BLEDevice::deinit(true);
+    } /*else if (ble_enabled == 1) {
+      BT_server_start();
+    }*/
+    DEBUG_PRINT(F("BLE: "));
+    DEBUG_PRINTLN(ble_enabled);
+  }
+
 }
 
 
