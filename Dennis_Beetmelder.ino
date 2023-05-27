@@ -70,7 +70,7 @@ static const unsigned char PROGMEM fish_bmp[] =
 
 Ticker OLEDdisplayer;
 
-float oled_rssi = -1000.0f;
+float oled_rssi = -1000.0f, ble_rssi = -1000.0f;
 uint32_t oled_packet = 0x0000;
 uint16_t oled_packetcount = 0;
 String oled_setting = "";
@@ -118,7 +118,8 @@ void OLED_show(uint32_t packet, float rssi, uint16_t packetcount, String setting
   oled.setTextSize(1);
   oled.setCursor(0,53);
   oled.print("RSSI: ");
-  oled.setCursor(36,53);
+  int16_t x = (rssi > -100.0)? 42 : 36;
+  oled.setCursor(x,53);
   oled.print(rssi);
   oled.setCursor(86,53);
   oled.print("dBm");
@@ -132,6 +133,7 @@ void OLED_show(uint32_t packet, float rssi, uint16_t packetcount, String setting
 // OLED static callback routine
 void OLED_display_callback() {
   OLED_show(oled_packet, oled_rssi, oled_packetcount, oled_setting);
+  ble_rssi = oled_rssi; // to send back to phone using ble
   oled_packet = 0x0000;
   oled_rssi = -1000.0f;
 }
@@ -196,11 +198,10 @@ class MyCallbacks: public BLECharacteristicCallbacks {
         DEBUG_PRINTLN(F(""));
         DEBUG_PRINT(F("BLE Received Value: "));
         for (int i = 0; i < rxValue.length(); i++) DEBUG_PRINT(rxValue[i]);
-        //DEBUG_PRINT(rxValue);
         DEBUG_PRINTLN(F(""));
         // change the setting
         String value = rxValue.c_str();
-        EditValue(value);
+        ProcessValue(value);
       }
     }
 };
@@ -233,8 +234,7 @@ void BT_server_start() {
 #define RADIO_DEVIATION_KHZ 3.5
 #define RADIO_RXBANDWIDTH_KHZ 25.0
 #define RADIO_AFCBANDWIDTH_KHZ 25.0
-// signal properties
-#define NOISE_FLOOR (-87.0)
+#define NOISE_FLOOR (-85.0)
 #define SIGNAL_US_IGNORE 150
 #define SIGNAL_US_BIT_0 700
 #define SIGNAL_US_BIT_1 1300
@@ -242,6 +242,7 @@ void BT_server_start() {
 // timeout values (in seconds)
 #define TIMEOUT_SERIAL_INPUT 1
 #define TIMEOUT_CLEAR 10
+#define TIMEOUT_LONG 60
 
 float prev_rssi = -1000.0f, rssi = -1000.0f, signal_rssi = -1000.0f;
 uint32_t signal_start, signal_end, signal_us;
@@ -264,51 +265,68 @@ int state;
   }
 
 
-void EditValue(String value) {
+void ProcessValue(String value) {
   // save the value for display during signal inactivity
   oled_setting = value;
   // process
-  if (value.substring(0,1) == "d") { // freq deviation
-    float freqDeviation = value.substring(1).toFloat();
+  String cmd = value.substring(0,1);
+  String cmdval = value.substring(1);
+  if (cmd == "f") { // frequency
+    float freq = cmdval.toFloat();
+    radio.setFrequency(freq);
+    DEBUG_PRINT(F("FREQUENCY: "));
+    DEBUG_PRINTLN(freq);
+  } else
+  if (cmd == "d") { // freq deviation
+    float freqDeviation = cmdval.toFloat();
     radio.setFrequencyDeviation(freqDeviation);
     DEBUG_PRINT(F("FREQUENCY DEVIATION: "));
     DEBUG_PRINTLN(freqDeviation);
   } else
-  if (value.substring(0,1) == "w") { // rx bandwidth
-    float rxBandwidth = value.substring(1).toFloat();
+  if (cmd == "w") { // rx bandwidth
+    float rxBandwidth = cmdval.toFloat();
     radio.setRxBandwidth(rxBandwidth);
     DEBUG_PRINT(F("RX BANDWIDTH: "));
     DEBUG_PRINTLN(rxBandwidth);
-  }
-  if (value.substring(0,1) == "r") { // bitrate
-    float bitrate = value.substring(1).toFloat();
+  } else
+  if (cmd == "r") { // bitrate
+    float bitrate = cmdval.toFloat();
     radio.setBitRate(bitrate);
     DEBUG_PRINT(F("BITRATE: "));
     DEBUG_PRINTLN(bitrate);
-  }
-  if (value.substring(0,1) == "s") { // rssi smoothing
-    uint8_t smooth = value.substring(1).toInt();
+  } else
+  if (cmd == "s") { // rssi smoothing
+    uint8_t smooth = cmdval.toInt();
     radio.setRSSIConfig(smooth); // 0=2 samples, 1=4 samples, 2=8 samples, 3=16...
     DEBUG_PRINT(F("RSSI SMOOTHING: "));
     DEBUG_PRINTLN(smooth);
-  }
-  if (value.substring(0,1) == "n") { // noisefloor
-    float noise = value.substring(1).toFloat();
+  } else
+  if (cmd == "n") { // noisefloor
+    float noise = cmdval.toFloat();
     radio.setBitRate(noise);
     DEBUG_PRINT(F("NOISEFLOOR: "));
     DEBUG_PRINTLN(noise);
-  }
-
-  if (value.substring(0,1) == "b") { // BLE enable/disable
-    uint8_t ble_enabled = value.substring(1).toInt();
+  } else
+  if (cmd == "b") { // BLE enable/disable
+    uint8_t ble_dummy = cmdval.toInt();
+/*    uint8_t ble_enabled = cmdval.toInt();
     if (ble_enabled == 0) {
-      BLEDevice::stopAdvertising();
+      pServer->getAdvertising()->stop();
+      BLEService *pService = pServer->getServiceByUUID(SERVICE_UUID);
+      pService->stop();
+      pServer->removeService(pService);
       BLEDevice::deinit(true);
-    } /*else if (ble_enabled == 1) {
+    } else if (ble_enabled == 1) {
       BT_server_start();
-    }*/
+    }
+*/
+    if (deviceConnected) {
+      String txValue = String(ble_rssi);
+      pTxCharacteristic->setValue((uint8_t*)txValue.c_str() , txValue.length());
+      pTxCharacteristic->notify();
+    }
     DEBUG_PRINT(F("BLE: "));
-    DEBUG_PRINTLN(ble_enabled);
+//    DEBUG_PRINTLN(ble_enabled);
   }
 
 }
@@ -431,7 +449,7 @@ void setup() {
   DEBUG_PRINT(F("esp_timer_get_time()+getRSSI() calls per second: "));
   DEBUG_PRINTLN(test_value);
 */
-  low_start = esp_timer_get_time() - LOW_US_EOP;
+  low_start = esp_timer_get_time();// - LOW_US_EOP;
 }
 
 
@@ -517,6 +535,11 @@ void loop() {
           if (signal_rssi > oled_rssi) oled_rssi = signal_rssi;
           oled_packetcount = packetcount;
           OLEDdisplayer.once_ms(1, OLED_display_callback);
+// debug test line
+//oled_setting = "YEAH";
+float diff = signal_rssi - noisefloor; // instead display something more useful: the difference signal vs. noisefloor
+oled_setting = String(diff);
+
         } else { // mismatch
           DEBUG_PRINT(F("\t\t"));
         }
@@ -535,6 +558,11 @@ void loop() {
       if ((esp_timer_get_time() - signal_end) / 1000000 > TIMEOUT_CLEAR) { // no signal for 10s
         packetcount = 0;
         OLED_show(0x00000000, rssi, 0x0000, oled_setting);
+      }
+
+      // reset the stuff..
+      if ((esp_timer_get_time() - signal_end) / 1000000 > TIMEOUT_LONG) { // no signal for a minute
+        oled_setting = "";
       }
 
       // Bluetooth
@@ -561,7 +589,7 @@ void loop() {
           String value = Serial.readString();
           DEBUG_PRINTLN(value);
           value.trim();
-          EditValue(value);
+          ProcessValue(value);
           while (Serial.available()) Serial.read();
           radio.startReceive();
         }
